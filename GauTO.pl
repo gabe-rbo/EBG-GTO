@@ -1,143 +1,89 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %
-%   EBG for GTO.
-%   This version unifies the variables of EBG for GTO.
-%   Currently looses non-determinism. To not loose non-determinism just cut out the meta-interpretation of g and t 
-%     predicates and replace it with call/1
+%   EBG for GTO (Explanation-Based Generalization for Generate-Test-Optimize).
+%   In this version, we don't meta-interpret the generation and test clauses.
+%   However, there is a one-to-one correspondence of variables from the head
+%   recursive call to the tail recursive call.
+%   This correspondence is precisely given by the fact that tail recursion is
+%   destructive while head recursion is constructive. Due to this, in tail
+%   recursion, the initial argument is not explicit, unlike head recursion,
+%   where it together with the base case are used to build the solution.
 %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 
-ebg(Goal, GeneralizedGoal, (GeneralizedGoal :- Condition), G, T, Unifications, (GeneralizedGoal :- GTO)) :-
+gauto(Goal, GenGoal, (GenGoal :- Condition), G, T, (GenGoal :- GTO)) :-
     prolog_current_choice(ChoicePoint),
-    ebg(Goal, GeneralizedGoal, Condition, ChoicePoint, [], G, [], T, [], Unifications),
-    gto(G, T, GTO).
+    ebg(Goal, GenGoal, Condition, ChoicePoint, [], G, [], T),
+    GenGoal =.. [_, InitArg, Solution], % We're assuming the clause head contains only 2 arguments
+    (   \+ var(InitArg) -> invert_variables_in_list(InitArg, Solution, G, NewG), reverse(NewG, GInv), gto(GInv, T, GTO) % Tail Recursion
+    ;   gto(G, T, GTO)). % Head Recursion
 
-ebg(A, Gen, Cond, G_In, G_Mid, T_In, T_Mid, U_In, U_Out) :-
+ebg(A, Gen, Cond, G_In, G_Mid, T_In, T_Mid) :-
+    % For when ChoicePoint should not be carried
     prolog_current_choice(ChoicePoint),
-    ebg(A, Gen, Cond, ChoicePoint, G_In, G_Mid, T_In, T_Mid, U_In, U_Out).
+    ebg(A, Gen, Cond, ChoicePoint, G_In, G_Mid, T_In, T_Mid).
 
 
-ebg(true, true, true, _ChoicePoint, G, G, T, T, U, U) :- !.
+ebg(true, true, true, _ChoicePoint, G, G, T, T) :- !.
 
-ebg(!, !, true, ChoicePoint, G, G, T, T, U, U) :-
+ebg(!, !, true, ChoicePoint, G, G, T, T) :-
     prolog_cut_to(ChoicePoint).
 
 
-ebg(Goal, GeneralizedGoal, GeneralizedGoal, _ChoicePoint, G, G_Out, T, T, U_In, U_Out) :-
-    g(GeneralizedGoal), !,
-    my_append(G, GeneralizedGoal, G_Out),
-    mi(Goal, GeneralizedGoal, Correspondences, []),
-    my_concat(U_In, Correspondences, U_Out).
+ebg(Goal, GenGoal, GenGoal, _ChoicePoint, G, G_Out, T, T) :-
+    g(GenGoal), !, call(Goal),
+    my_append(G, GenGoal, G_Out).
 
-ebg(Goal, GeneralizedGoal, GeneralizedGoal, _ChoicePoint, G, G, T, T_Out, U_In, U_Out) :-
-    t(GeneralizedGoal), !,
-    my_append(T, GeneralizedGoal, T_Out),
-    mi(Goal, GeneralizedGoal, Correspondences, []),
-    my_concat(U_In, Correspondences, U_Out).
+ebg(Goal, GenGoal, GenGoal, _ChoicePoint, G, G, T, T_Out) :-
+    t(GenGoal), !, call(Goal),
+    my_append(T, GenGoal, T_Out).
 
-
-ebg(Var is Expr, GeneralizedVar is _GeneralizedExpr, true, _ChoicePoint, G, G, T, T, U, U) :- !,
+%                                   GenVar is GenExpr
+ebg(Var is Expr, GenVar is _GenExpr,      true       , _ChoicePoint, G, G, T, T) :- !,
+    % To unify the distance variables
     call(Var is Expr),
-    GeneralizedVar = Var.
+    GenVar = Var.
 
-ebg(Goal, GeneralizedGoal, GeneralizedGoal, _ChoicePoint, G, G, T, T, U, U) :-
+ebg(Goal, GenGoal, GenGoal, _ChoicePoint, G, G, T, T) :-
     Goal \= (_, _), Goal \= (_; _), Goal \= (_ -> _),
     predicate_property(Goal, built_in), !,
     call(Goal).
 
 
-ebg(Goal, GeneralizedGoal, Cond, _ChoicePoint, G_In, G_Out, T_In, T_Out, U_In, U_Out) :-
+ebg(Goal, GenGoal, Cond, _ChoicePoint, G_In, G_Out, T_In, T_Out) :-
     Goal \= (_, _), Goal \= (_; _), Goal \= (_ -> _),
     prolog_current_choice(ChoicePoint),
-    clause(GeneralizedGoal, GeneralizedBody),
-    copy_term((GeneralizedGoal :- GeneralizedBody), (Goal :- Body)),
-    ebg(Body, GeneralizedBody, Cond, ChoicePoint, G_In, G_Out, T_In, T_Out, U_In, U_Out).
+    clause(GenGoal, GenBody),
+    copy_term((GenGoal :- GenBody), (Goal :- Body)),
+    ebg(Body, GenBody, Cond, ChoicePoint, G_In, G_Out, T_In, T_Out).
 
 
-ebg((A, B), (GenA, GenB), Cond, ChoicePoint, G_In, G_Out, T_In, T_Out, U_In, U_Out) :-
-    ebg(A, GenA, CondA, ChoicePoint, G_In, G_Mid, T_In, T_Mid, U_In, U_Mid),
-    ebg(B, GenB, CondB, ChoicePoint, G_Mid, G_Out, T_Mid, T_Out, U_Mid, U_Out),
+ebg((A, B), (GenA, GenB), Cond, ChoicePoint, G_In, G_Out, T_In, T_Out) :-
+    ebg(A, GenA, CondA, ChoicePoint, G_In, G_Mid, T_In, T_Mid),
+    ebg(B, GenB, CondB, ChoicePoint, G_Mid, G_Out, T_Mid, T_Out),
     simplify((CondA, CondB), Cond).
 
-ebg((A -> B), (GenA -> GenB), Cond, ChoicePoint, G_In, G_Out, T_In, T_Out, U_In, U_Out) :-
-    ebg(A, GenA, CondA, G_In, G_Mid, T_In, T_Mid, U_In, U_Mid), !,
-    ebg(B, GenB, CondB, ChoicePoint, G_Mid, G_Out, T_Mid, T_Out, U_Mid, U_Out),
+ebg((A -> B), (GenA -> GenB), Cond, ChoicePoint, G_In, G_Out, T_In, T_Out) :-
+    ebg(A, GenA, CondA, G_In, G_Mid, T_In, T_Mid), !,
+    ebg(B, GenB, CondB, ChoicePoint, G_Mid, G_Out, T_Mid, T_Out),
     simplify((CondA -> CondB), Cond).
 
-ebg((A -> B; _), (GenA -> GenB), Cond, ChoicePoint, G_In, G_Out, T_In, T_Out, U_In, U_Out) :-
-    ebg(A, GenA, CondA, G_In, G_Mid, T_In, T_Mid, U_In, U_Mid), !,
-    ebg(B, GenB, CondB, ChoicePoint, G_Mid, G_Out, T_Mid, T_Out, U_Mid, U_Out),
+ebg((A -> B; _), (GenA -> GenB), Cond, ChoicePoint, G_In, G_Out, T_In, T_Out) :-
+    ebg(A, GenA, CondA, G_In, G_Mid, T_In, T_Mid), !,
+    ebg(B, GenB, CondB, ChoicePoint, G_Mid, G_Out, T_Mid, T_Out),
     simplify((CondA -> CondB), Cond).
 
-ebg((_ -> _; C), GenC, CondC, ChoicePoint, G_In, G_Out, T_In, T_Out, U_In, U_Out) :- !,
-    ebg(C, GenC, CondC, ChoicePoint, G_In, G_Out, T_In, T_Out, U_In, U_Out).
+ebg((_ -> _; C), GenC, CondC, ChoicePoint, G_In, G_Out, T_In, T_Out) :- !,
+    ebg(C, GenC, CondC, ChoicePoint, G_In, G_Out, T_In, T_Out).
 
-ebg((A; B), (GenA; GenB), Cond, ChoicePoint, G_In, G_Out, T_In, T_Out, U_In, U_Out) :-
-    (   ebg(A, GenA, CondA, ChoicePoint, G_In, G_Out, T_In, T_Out, U_In, U_Out)
-    ;   ebg(B, GenB, CondB, ChoicePoint, G_In, G_Out, T_In, T_Out, U_In, U_Out)
+ebg((A; B), (GenA; GenB), Cond, ChoicePoint, G_In, G_Out, T_In, T_Out) :-
+    (   ebg(A, GenA, CondA, ChoicePoint, G_In, G_Out, T_In, T_Out)
+    ;   ebg(B, GenB, CondB, ChoicePoint, G_In, G_Out, T_In, T_Out)
     ),
     simplify((CondA; CondB), Cond).
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%
-% Meta-Interpreter (Not fully implemented because most predicates are only conjunctions)
-%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-mi(Goal, GeneralizedGoal, Correspondences, Accumulator) :-
-    prolog_current_choice(ChoicePoint),
-    mi(Goal, GeneralizedGoal, Correspondences, Accumulator, ChoicePoint).
-
-mi(true, true, Correspondences, Correspondences, _ChoicePoint) :- !.
-
-mi(!, !, Correspondences, Correspondences, ChoicePoint) :- prolog_cut_to(ChoicePoint).
-
-mi(Goal, GeneralizedGoal, Correspondences, AccumulatorC, _ChoicePoint) :-
-    g(Goal), !,
-    GeneralizedGoal =.. [_|GenGoalArgs],
-    Goal =.. [_|GoalArgs],
-    create_correspondences(GenGoalArgs, GoalArgs, Corresp),
-    my_concat(AccumulatorC, Corresp, AccumulatorC1),
-    prolog_current_choice(ChoicePoint),
-    clause(GeneralizedGoal, GeneralizedBody),
-    copy_term((GeneralizedGoal :- GeneralizedBody), (Goal :- Body)),
-    mi(Body, GeneralizedBody, Correspondences, AccumulatorC1, ChoicePoint).
-
-mi(Goal, GeneralizedGoal, Correspondences, AccumulatorC, _ChoicePoint) :-
-    t(Goal), !,
-    GeneralizedGoal =.. [_|GenGoalArgs],
-    Goal =.. [_|GoalArgs],
-    create_correspondences(GenGoalArgs, GoalArgs, Corresp),
-    my_concat(AccumulatorC, Corresp, AccumulatorC1),
-    prolog_current_choice(ChoicePoint),
-    clause(GeneralizedGoal, GeneralizedBody),
-    copy_term((GeneralizedGoal :- GeneralizedBody), (Goal :- Body)),
-    mi(Body, GeneralizedBody, Correspondences, AccumulatorC1, ChoicePoint).
-
-
-mi(Goal, _GeneralizedGoal, Correspondences, Correspondences, _ChoicePoint) :-
-    Goal \= (_, _), Goal\= (_; _), Goal \= (_ -> _), Goal \= !,
-    predicate_property(Goal, built_in), !, call(Goal).
-
-mi(Goal, GeneralizedGoal, Correspondences, AccumulatorC, _ChoicePoint) :-
-    Goal \= (_, _), Goal\= (_; _), Goal \= (_ -> _), Goal \= !,
-    prolog_current_choice(ChoicePoint),
-    clause(GeneralizedGoal, GeneralizedBody),
-    copy_term((GeneralizedGoal :- GeneralizedBody), (Goal :- Body)),
-    mi(Body, GeneralizedBody, Correspondences, AccumulatorC, ChoicePoint).
-
-mi((A, B), (GenA, GenB), Correspondences, Accumulator, ChoicePoint) :-
-    mi(A, GenA, CorrespondA, Accumulator, ChoicePoint),
-    mi(B, GenB, Correspondences, CorrespondA, ChoicePoint).
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%
-% Simplifier for EBG Conditions
-%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-
+% Simplifies the generalization when necessary.
 simplify((true, CondB), CondB) :- !.
 simplify((CondA, true), CondA) :- !.
 simplify((CondA, CondB), (CondA, CondB)).
@@ -152,73 +98,42 @@ simplify((CondA; CondB), (CondA; CondB)).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %
-% Aux. Predicates
+%   Variable Inversion
 %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-create_correspondences([X], [Y], [X/Y]).
-create_correspondences([X|L1], [Y|L2], [X/Y|L3]) :-
-    create_correspondences(L1, L2, L3).
+invert_variables_in_list(VarsList1, VarsList2, OriginalGoalList, InvertedGoalList) :-
+    % 1. Creates the bidirectional mapping for swapping (e.g., [A/E, E/A, ...])
+    create_bidirectional_mapping(VarsList1, VarsList2, Mapping),
 
-gto(G, T, GTO) :-
-    schedule_goals(G, T, [], Body, []),
-    list_to_conjunction(Body, GTO).
+    % 2. Processes the goal list to generate the inverted list
+    swap_variables_goal_list(Mapping, OriginalGoalList, InvertedGoalList).
 
-schedule_goals([], T, _CurrentVars, Body, Accumulator) :- my_append(Accumulator, T, Body).
+swap_variables_goal_list(_, [], []) :- !.
+swap_variables_goal_list(Mapping, [Goal | Goals], [NewGoal | NewGoals]) :-
+    % For each goal, swap its internal variables recursively.
+    swap_terms(Mapping, Goal, NewGoal),
+    swap_variables_goal_list(Mapping, Goals, NewGoals).
 
-schedule_goals([G1|G], T, CurrentVars, Body, BodyAccumulator) :-
-    G1 =.. [_|G1Attr],
-    my_term_variables(G1Attr, G1Vars),
-    my_concat(CurrentVars, G1Vars, AllVars),
-    can_be_tested(AllVars, T, Testable, []),
-    subtract_list(T, Testable, RemainingTests),
-    my_concat(BodyAccumulator, [G1|Testable], BodyAccumulator1),
-    schedule_goals(G, RemainingTests, AllVars, Body, BodyAccumulator1).
+create_bidirectional_mapping([], [], []) :- !.
+create_bidirectional_mapping([H1|T1], [H2|T2], [H1/H2, H2/H1 | RestMapping]) :-
+    create_bidirectional_mapping(T1, T2, RestMapping).
 
-can_be_tested(_GeneratedVars, [], Testable, Testable).
+find_substitute(Term, [Key/Value | _], Value) :-
+    same_term(Term, Key), !.
+find_substitute(Term, [Key/Value | _], Key) :-
+    same_term(Term, Value), !.
+find_substitute(Term, [_|Tail], Substitute) :-
+    find_substitute(Term, Tail, Substitute).
 
-can_be_tested(GeneratedVars, [T1|Ts], Testable, Accumulator) :-
-    T1 =.. [_|T1Attr],
-    my_term_variables(T1Attr, T1Vars),
-    (   is_subset(T1Vars, GeneratedVars) -> my_append(Accumulator, T1, Accumulator1),
-                                        can_be_tested(GeneratedVars, Ts, Testable, Accumulator1)
-    ;   can_be_tested(GeneratedVars, Ts, Testable, Accumulator)).
-
-my_term_variables([], []) :- !.
-my_term_variables([G1|Gs], [G1|R]) :- var(G1), !, my_term_variables(Gs, R).
-my_term_variables([_G1|Gs], R) :-
-    my_term_variables(Gs, R).
-
-list_to_conjunction([A, B], (A, B)) :- !.
-list_to_conjunction([A|C], (A, TC)) :-
-    list_to_conjunction(C, TC).
-
-
-my_append(L, [], L) :- !.
-my_append([], L, [L]) :- !.
-my_append([H|T], L, [H|R]) :-
-    my_append(T, L, R).
-
-my_compare(_T, []) :- !, fail.
-my_compare(T, [G1|_]) :-
-    same_term(T, G1), !.
-my_compare(T, [_|GVars]) :-
-    my_compare(T, GVars).
-
-my_concat([], L2, L2).
-my_concat([X|L1], L2, [X|L3]) :-
-    my_concat(L1, L2, L3).
-
-is_subset([], _) :- true.
-is_subset([E|R], Set) :-
-    my_compare(E, Set),
-    is_subset(R, Set).
-
-subtract_list([], _, R) :-
-    R = [].
-subtract_list([E|T], D, R) :-
-    (   my_compare(E, D)
-    ->  subtract_list(T, D, R)
-    ;   R = [E|R1],
-        subtract_list(T, D, R1)
+swap_terms(Mapping, Term, Substitute) :-
+    var(Term),
+    !,
+    (   find_substitute(Term, Mapping, Substitute) -> true
+    ;   Substitute = Term
     ).
+    
+swap_terms(_, Term, Term) :-
+    atomic(Term), !.
+swap_terms(Mapping, CompoundTerm, NewCompoundTerm) :-
+    CompoundTerm =..
