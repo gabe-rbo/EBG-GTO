@@ -16,8 +16,8 @@ gauto(Goal, GenGoal, (GenGoal :- Condition), G, T, (GenGoal :- GTO)) :-
     prolog_current_choice(ChoicePoint),
     ebg(Goal, GenGoal, Condition, ChoicePoint, [], G, [], T),
     GenGoal =.. [_, InitArg, Solution], % We're assuming the clause head contains only 2 arguments
-    (   \+ var(InitArg) -> invert_variables_in_list(InitArg, Solution, G, NewG), reverse(NewG, GInv), gto(GInv, T, GTO) % Tail Recursion
-    ;   gto(G, T, GTO)). % Head Recursion
+    (   \+ var(InitArg) -> invert_variables_in_list(InitArg, Solution, G, NewG), reverse(NewG, GInv), gto(GInv, T, GTO) % Head Recursion
+    ;   gto(G, T, GTO)). % Tail Recursion
 
 ebg(A, Gen, Cond, G_In, G_Mid, T_In, T_Mid) :-
     % For when ChoicePoint should not be carried
